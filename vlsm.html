@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>CALCULEUR VLSM</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{
+    --bg:#0f0f14;
+    --card:#1a1a26;
+    --accent:#00c2ff;
+    --text:#e1e1ff;
+    --border:#2c2c42;
+  }
+  *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  html,body{height:100%;margin:0}
+  body{display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
+  .content{
+    flex:1 0 auto;
+    border:4px solid var(--accent);
+    border-radius:10px;
+    background:var(--card);
+    margin:20px;
+    padding:30px;
+    min-height:calc(100vh - 40px - 60px);
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+  }
+  /* Bloc titre + description */
+  .header{
+    text-align:center;
+    margin-bottom:30px;
+  }
+  .header h1{
+    margin:0;
+    font-size:26px;
+    font-weight:600;
+    color:var(--accent);
+  }
+  .header p{
+    margin:4px 0 0;
+    font-size:14px;
+    color:var(--text);
+    opacity:.8;
+  }
+
+  label{display:block;margin:8px 0 4px;font-size:14px}
+  input[type=text],input[type=number]{width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text)}
+  button{cursor:pointer;border:none;border-radius:6px;padding:8px 16px;font-size:14px;font-weight:600;margin-right:6px}
+  .btn-primary{background:var(--accent);color:#000}
+  .btn-outline{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  .btn-danger{background:#ff3b30;color:#fff}
+  .domaine{background:var(--bg);padding:15px;margin-bottom:12px;border-radius:8px;border:1px solid var(--border)}
+  .center{display:flex;justify-content:center;gap:12px;margin-top:10px;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:12px 8px;text-align:left}
+  th{background:var(--border);color:var(--accent)}
+  tr:nth-child(even){background:#14141d}
+  #result{display:none;margin-top:20px}
+  footer{flex-shrink:0;height:60px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--accent);background:var(--bg)}
+</style>
+</head>
+<body>
+
+<div class="content">
+  <div class="header">
+    <h1>CALCULATEUR VLSM</h1>
+    <p>Facilitez vos calculs de sous-réseaux avec cet outil</p>
+  </div>
+
+  <label>
+    Adresse IP / CIDR de départ :
+    <input type="text" id="startIP" placeholder="10.0.0.0/8">
+  </label>
+
+  <div id="domains"></div>
+
+  <div class="center">
+    <button class="btn-outline" onclick="addDomain()">+ Ajouter un domaine</button>
+    <button class="btn-primary" onclick="calculate()">Calculer le VLSM</button>
+    <button class="btn-outline" onclick="resetAll()">Réinitialiser</button>
+  </div>
+
+  <table id="result" style="display:none">
+    <thead>
+      <tr>
+        <th>Rang</th>
+        <th>Nom</th>
+        <th>Hôtes</th>
+        <th>Réseau (CIDR)</th>
+        <th>Première IP</th>
+        <th>Dernière IP</th>
+        <th>Broadcast</th>
+        <th>Masque</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <button id="btnExport" class="btn-primary" style="display:none;margin-top:10px;" onclick="exportCSV()">Exporter CSV</button>
+</div>
+
+<footer>
+  Made with ❤️ by <strong>LECRYPTIQUE</strong> © 2025 All rights reserved.
+</footer>
+
+<script>
+let domainCount = 0;
+addDomain();
+
+function addDomain(){
+  domainCount++;
+  const div=document.createElement('div');
+  div.className='domaine';
+  div.innerHTML=`
+    <label>Nom du domaine</label>
+    <input type="text" class="domName" placeholder="Domaine ${domainCount}">
+    <label>Nombre de machines</label>
+    <input type="number" min="1" class="domSize">
+    <button class="btn-danger" onclick="this.parentElement.remove()">Supprimer</button>
+  `;
+  document.getElementById('domains').appendChild(div);
+}
+
+function resetAll(){
+  document.getElementById('startIP').value='';
+  document.getElementById('domains').innerHTML='';
+  document.getElementById('result').style.display='none';
+  document.getElementById('btnExport').style.display='none';
+  domainCount=0;
+  addDomain();
+}
+
+function ip2long(ip){return ip.split('.').reduce((a,v)=>a*256+ +v,0);}
+function long2ip(n){return [(n>>>24)&0xFF,(n>>>16)&0xFF,(n>>>8)&0xFF,n&0xFF].join('.');}
+function nextPow2(n){return 1<<(32-Math.clz32(n-1));}
+
+function calculate(){
+  const start=document.getElementById('startIP').value.trim();
+  if(!start.match(/^\d+\.\d+\.\d+\.\d+\/\d+$/)){alert('Format invalide (x.x.x.x/y)');return;}
+  const [ipStr,cidrStr]=start.split('/');
+  let ipInt=ip2long(ipStr);
+  let cidr=parseInt(cidrStr);
+
+  const domains=[...document.querySelectorAll('.domaine')].map((d,i)=>{
+    const name=d.querySelector('.domName').value.trim()||`Domaine ${i+1}`;
+    const size=parseInt(d.querySelector('.domSize').value);
+    return size>0?{name,size}:null;
+  }).filter(Boolean).sort((a,b)=>b.size-a.size);
+
+  if(!domains.length){alert('Aucun domaine défini');return;}
+
+  const tbody=document.querySelector('#result tbody');
+  tbody.innerHTML='';
+  domains.forEach(d=>{
+    const needed=d.size+2;
+    const hosts=nextPow2(needed);
+    const bits=32-Math.log2(hosts);
+    const mask=-1<<(32-bits)>>>0;
+    const netInt=ipInt&mask;
+    const first=netInt+1;
+    const last=netInt+hosts-2;
+    const broad=netInt+hosts-1;
+
+    tbody.insertAdjacentHTML('beforeend',`<tr>
+      <td>${domains.indexOf(d)+1}</td>
+      <td>${d.name}</td>
+      <td>${d.size}</td>
+      <td>${long2ip(netInt)}/${bits}</td>
+      <td>${long2ip(first)}</td>
+      <td>${long2ip(last)}</td>
+      <td>${long2ip(broad)}</td>
+      <td>${long2ip(mask)}</td>
+    </tr>`);
+    ipInt=broad+1;
+  });
+  document.getElementById('result').style.display='table';
+  document.getElementById('btnExport').style.display='inline-block';
+}
+
+function exportCSV(){
+  const rows=[['Rang','Nom','Hôtes','Réseau (CIDR)','Première IP','Dernière IP','Broadcast','Masque']];
+  document.querySelectorAll('#result tbody tr').forEach(tr=>{
+    const cells=Array.from(tr.children).map(td=>td.textContent);
+    rows.push(cells);
+  });
+  const csvContent='data:text/csv;charset=utf-8,'+rows.map(r=>r.join(',')).join('\n');
+  const encodedUri=encodeURI(csvContent);
+  const link=document.createElement('a');
+  link.setAttribute('href',encodedUri);
+  link.setAttribute('download','vlsm_export.csv');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+</script>
+</body>
+</html>
